@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+	<Product Id="*" Name="Ярмарки выходного дня - Parity" Language="1049" Version="1.0.0.3" Manufacturer="Orbita" UpgradeCode="f8cbfc60-f86d-4c87-9409-b751bd94b343" Codepage="1251">
+		<Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+
+	  <MajorUpgrade DowngradeErrorMessage="Уже установлена более новая версия [ProductName]." />
+		<MediaTemplate EmbedCab="yes"/>
+		<Feature Id="ProductFeature" Title="Ярмарки выходного дня - Parity" Level="1">
+			<ComponentGroupRef Id="ProductComponents" />
+		</Feature>
+    <Property Id="DISABLEADVTSHORTCUTS" Value="1" />
+	</Product>
+
+	<Fragment>
+	  <Directory Id="TARGETDIR" Name="SourceDir">
+	    <Directory Id="DesktopFolder" SourceName="Desktop" />
+	    <Directory Id="ProgramFilesFolder">
+	      <Directory Id="MANUFACTORERDIRECTORY" Name="Orbita">
+	        <Directory Id="INSTALLFOLDER" Name="Fairs Client"/>
+	      </Directory>
+	    </Directory>
+	  </Directory>
+	</Fragment>
+
+	<Fragment>
+	  <Icon Id="orbitalogo.ico" SourceFile="orbitalogo.ico" />
+		<ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+		  <Component Id="application" Guid="F03780E9-FC16-476D-A77B-25D83A521B21">
+		    <File Id="chain.json" Source="..\..\..\..\config\chain.json"/>
+		    <File Id="ethkey.exe" Source="Parity\ethkey.exe" Checksum="yes"/>
+		    <File Id="ethstore.exe" Source="Parity\ethstore.exe" Checksum="yes"/>
+		    <File Id="logo.ico" Source="Parity\logo.ico" />
+		    <File Id="parity.exe" Source="Parity\parity.exe" Checksum="yes"/>
+		    <File Id="parityevm.exe" Source="Parity\parity-evm.exe" Checksum="yes"/>
+		    <File Id="run_parity.bat" Source="Parity\run_parity.bat"/>
+		    <File Id="run_parityui.bat" Source="Parity\run_parityui.bat" KeyPath="yes">
+		      <Shortcut Id="run_parityui.lnk"
+		                Advertise="yes"
+                    Directory="DesktopFolder"
+		                Name="Ярмарки выходного дня"
+		                WorkingDirectory="INSTALLFOLDER"
+		                Icon ="orbitalogo.ico" />
+		    </File>
+		  </Component>
+		</ComponentGroup>
+    
+	  <CustomAction Id="RunParity" Directory="INSTALLFOLDER" ExeCommand="cmd.exe /c run_parity.bat" Return="asyncNoWait"/>
+	  <InstallExecuteSequence>
+	    <Custom Action="RunParity" After="InstallFinalize">NOT REMOVE</Custom>
+	  </InstallExecuteSequence>
+	</Fragment>
+</Wix>
