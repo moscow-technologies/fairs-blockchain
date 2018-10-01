@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
+  <Bundle Name="Ярмарки выходного дня" Version="1.0.1.4" Manufacturer="Orbita" UpgradeCode="689e2dbf-cad6-4838-8cd5-1ff601d09d98" >
+    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.RtfLicense">
+      <bal:WixStandardBootstrapperApplication LicenseFile="license.rtf"/>
+    </BootstrapperApplicationRef>
+
+    <Chain>
+      <ExePackage Id="dapp" Cache="no" SourceFile="DappInstaller.exe" />
+      <MsiPackage Id="parity" Cache="no" SourceFile="..\FairsParity\bin\$(var.Build)\FairsParityInstaller.msi" />
+      <ExePackage Id="parityui" Cache="no" SourceFile="parity-ui-setup-0.1.4.exe" />
+      <ExePackage Id="send_installation_success" Cache="no" SourceFile="..\send_installation_success\target\release\send_installation_success.exe" />
+    </Chain>
+  </Bundle>
+
+</Wix>
