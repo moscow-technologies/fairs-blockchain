@@ -5,7 +5,7 @@
 ## Установка блокчейн-ноды
 
 ### Windows
-  - Скачайте и запустите [установочный пакет](https://www.mos.ru/blockchain-yarmarki/download)
+  - Скачайте и запустите [установочный пакет](https://www.mos.ru/blockchain-yarmarki/download/0.2/FairsClientInstaller.exe)
   - В случае успешной установки откроется приложение `Parity UI`, а также системная консоль, в ней отобразится синхронизация блокчейна (появятся фразы вида `Imported #3461 d75f…27e3 (0 txs, 0.00 Mgas, 0.86 ms, 0.57 KiB)`)
 
 ### MacOS
