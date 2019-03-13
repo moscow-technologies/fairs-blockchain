@@ -1,9 +1,11 @@
 {
-  "name": "MosFairs",
+  "name": "MoscowFairs",
   "engine": {
     "authorityRound": {
       "params": {
         "stepDuration": "5",
+        "emptyStepsTransition" : 1,
+        "maximumEmptySteps": 1000000000,
         "validators": {
           "list": [
             "0x00Bd138aBD70e2F00903268F3Db08f2D25677C9e",
@@ -11,8 +13,6 @@
             "0x002e28950558fbede1a9675cb113f0bd20912019"
           ]
         },
-        "validateScoreTransition": 1000000000,
-        "validateStepTransition": 1500000000,
         "maximumUncleCount": 1000000000
       }
     }
@@ -70,6 +70,9 @@
     },
     "0x0076ed2DD9f7dc78e3f336141329F8784D8cd564": {
       "balance": "10000000000000000000000000000"
+    },
+    "0xD207240bEefE358B56af588D1Ca4d0E9e6A82FF3": {
+       "balance": "10000000000000000000000000000"
     },
     "0x006dB7698B897B842a42A1C3ce423b07C2656Ecd": {
       "balance": "10000000000000000000000000000"
