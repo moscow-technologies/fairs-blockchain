@@ -1,21 +1,14 @@
 # Инструкция по использованию локальной блокчейн-ноды
-Описание установки блокчейн-ноды  для [проекта](https://www.mos.ru/blockchain-yarmarki/){:target="_blank"}.
+Описание установки блокчейн-ноды  для [проекта](https://www.mos.ru/blockchain-yarmarki/).
 Для развертывания локального узла блокчейн-сети необходима установка специализированного ПО [Parity](https://www.parity.io) и запуск его со специальной конфигурацией. Все инструкции по установке и просмотру данных ниже.
 
 ## Установка блокчейн-ноды
 
 ### Windows
-  - Скачайте и запустите [установочный пакет](https://www.mos.ru/blockchain-yarmarki/download/0.2.1/FairsClientInstaller.exe)
-  - В случае успешной установки откроется приложение `Parity UI`, а также системная консоль, в ней отобразится синхронизация блокчейна (появятся фразы вида `Imported #3461 d75f…27e3 (0 txs, 0.00 Mgas, 0.86 ms, 0.57 KiB)`)
+  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/v1.0/MoscowFairs.1.0.0.exe)
 
 ### MacOS
-  - Откройте системный терминал и запустите команду
-```sh
-wget -O - https://raw.githubusercontent.com/moscow-technologies/fairs-blockchain/master/install/run_macosx.sh | bash
-```
-  - В процессе установки потребуется ввести пароль от учетной записи пользователя
-  - В случае успешной установки в консоли отобразится процесс синхронизации блокчейна (появятся фразы вида `Imported #3461 d75f…27e3 (0 txs, 0.00 Mgas, 0.86 ms, 0.57 KiB)`)
-  - Откроется приложение `Parity UI`, введите токен авторизации (его можно найти в консоли под фразой `Or use the generated token:`)
+  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/v1.0/MoscowFairs.1.0.0.dmg)
 
 ## Работа с интерфейсом Parity UI
 Приложение Parity UI предоставляет ряд системных и прикладных интерфейсов для работы с локальной блокчейн-нодой. 
@@ -24,7 +17,7 @@ wget -O - https://raw.githubusercontent.com/moscow-technologies/fairs-blockchain
 
 ### Dapp *Ярмарки выходного дня* 
 Прикладной интерфейс поиска и просмотра заявок на участие в ярмарках выходного дня. 
-Функционал  аналогичен размещенному в разделе  [https://www.mos.ru/blockchain-yarmarki](https://www.mos.ru/blockchain-yarmarki/){:target="_blank"}, но работает с локальной нодой блокчейна, синхронизированной с блокчейн-сетью.
+Функционал  аналогичен размещенному в разделе  [https://www.mos.ru/blockchain-yarmarki](https://www.mos.ru/blockchain-yarmarki/), но работает с локальной нодой блокчейна, синхронизированной с блокчейн-сетью.
 ![Приложение Ярмарки выходного дня](https://raw.githubusercontent.com/moscow-technologies/fairs-blockchain/master/docs/images/fairs-dapp-screen.png)
 
 ### Dapp *Node Status*
