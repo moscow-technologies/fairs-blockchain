@@ -1,0 +1,39 @@
+{
+  "appId": "io.parity.ui.fairs",
+  "directories": {
+    "buildResources": "./"
+  },
+  "linux": {
+    "category": "Utility",
+    "icon": "./assets/icon/small-white-512x512.png",
+    "target": [
+      "AppImage",
+      "snap",
+      "deb",
+      "tar.xz"
+    ]
+  },
+  "mac": {
+    "category": "public.app-category.productivity",
+    "icon": "./assets/icon/small-white-512x512.png",
+    "target": [
+      "dmg"
+    ]
+  },
+  "nsis": {
+    "include": "./electron/installers/windows/installer.nsh",
+    "allowToChangeInstallationDirectory": true,
+    "oneClick": false,
+    "perMachine": true
+  },
+  "pkg": {
+    "allowAnywhere": false,
+    "allowCurrentUserHome": false
+  },
+  "productName": "Parity UI Fairs",
+  "win": {
+    "icon": "./assets/icon/small-white-512x512.png",
+    "publisherName": "Orbita Center",
+    "target": "nsis"
+  }
+}

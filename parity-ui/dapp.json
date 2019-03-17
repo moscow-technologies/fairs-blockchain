@@ -1,0 +1,11 @@
+{
+    "id": "fairs-dapp",
+    "path": "https://raw.githubusercontent.com/moscow-technologies/fairs-blockchain/master/config/chain.json",
+    "name": "Ярмарки выходного дня",
+    "package": "fairs-dapp",
+    "description": "Дапп ярмарок выходного дня",
+    "author": "Orbita Center",
+    "version": "1.0.0",
+    "visible": true,
+    "enode": "enode://1412ee9b9e23700e4a67a8fe3d8d02e10376b6e1cb748eaaf8aa60d4652b27872a8e1ad65bb31046438a5d3c1b71b00ec3ce0b4b42ac71464b28026a3d0b53af@94.79.51.218:30303,enode://9e0036d4200f4a6124cf02ae0f760d04ff213d96344e02fe181bb18a2710a2b8ab85cd3e17073b77a723724b13a3e7ffd49451571464a5414a2ce44e92f50e62@94.79.51.219:30303,enode://d9139e0a0d1a3169108219bad9ae77eebedbb384b63000509a25e5f42ebac887dca73dce50abc661d2ca9bc45ebc4be84f2e7fb38938c3c51f034233f216e7e0@94.79.51.220:30303"
+}
