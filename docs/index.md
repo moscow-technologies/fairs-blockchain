@@ -5,10 +5,10 @@
 ## Установка блокчейн-ноды
 
 ### Windows
-  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/v1.0/MoscowFairs.1.0.0.exe)
+  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/1.1/Parity.UI.Fairs-1.1.0.exe)
 
 ### MacOS
-  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/v1.0/MoscowFairs.1.0.0.dmg)
+  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/1.1/Parity.UI.Fairs-1.1.0.dmg)
 
 ## Предварительная настройка
 
