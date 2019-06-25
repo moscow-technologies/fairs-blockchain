@@ -60,7 +60,7 @@ const getOs = () => {
 };
 
 // Fetch parity from https://vanity-service.parity.io/parity-binaries
-module.exports = mainWindow =>
+module.exports = (mainWindow, downloadItem) =>
   axios
     .get(
       `https://vanity-service.parity.io/parity-binaries?version=${channel}&os=${getOs()}&architecture=${getArch()}`
@@ -74,7 +74,8 @@ module.exports = mainWindow =>
       download(mainWindow, downloadUrl, {
         directory: app.getPath('userData'),
         onProgress: progress =>
-          mainWindow.webContents.send('parity-download-progress', progress) // Notify the renderers
+          mainWindow.webContents.send('parity-download-progress', progress),
+        onStarted: item => { downloadItem.item = item; }
       })
     )
     .then(() => fsChmod(parityPath(), '755'))

@@ -15,11 +15,14 @@
 // along with Parity.  If not, see <http://www.gnu.org/licenses/>.
 
 const fs = require('fs');
-const util = require('util');
 
 const parityPath = require('../utils/parityPath');
+const fetchParity = require('./fetchParity');
 
-const fsExists = util.promisify(fs.stat);
-
-module.exports = () => fsExists(parityPath())
-  .then(() => { global.isParityInstalled = true; });
+module.exports = async (mainWindow, downloadItem) => {
+  if (fs.existsSync(parityPath())) {
+    global.isParityInstalled = true;
+  } else {
+    await fetchParity(mainWindow, downloadItem);
+  }
+};

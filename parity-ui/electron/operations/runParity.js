@@ -16,17 +16,11 @@
 
 const { app } = require('electron');
 const fs = require('fs');
-const noop = require('lodash/noop');
 const { spawn } = require('child_process');
-const util = require('util');
 
-const { cli, parityArgv } = require('../cli');
+const { cli, getParityArgs } = require('../cli');
 const handleError = require('./handleError');
 const parityPath = require('../utils/parityPath');
-
-const fsChmod = util.promisify(fs.chmod);
-const fsExists = util.promisify(fs.stat);
-const fsUnlink = util.promisify(fs.unlink);
 
 let parity = null; // Will hold the running parity instance
 
@@ -39,7 +33,7 @@ const catchableErrors = [
 ];
 
 module.exports = {
-  runParity (mainWindow) {
+  async runParity () {
     try {
       // Do not run parity with --no-run-parity
       if (cli.runParity === false) {
@@ -49,76 +43,72 @@ module.exports = {
       // Create a logStream to save logs
       const logFile = `${parityPath()}.log`;
 
-      fsExists(logFile)
-        .then(() => fsUnlink(logFile)) // Delete logFile and create a fresh one on each launch
-        .catch(noop)
-        .then(() => fsChmod(parityPath(), '755')) // Should already be 755 after download, just to be sure
-        .then(() => {
-          const logStream = fs.createWriteStream(logFile, { flags: 'a' });
-          let logLastLine = ''; // Always contains last line of the logFile
+      const fsExist = fs.existsSync(logFile);
 
-          // Run an instance of parity with the correct args
-          parity = spawn(parityPath(), parityArgv);
+      if (fsExist) {
+        fs.unlinkSync(logFile);
+      }
+      fs.chmodSync(parityPath(), '755');
 
-          // Pipe all parity command output into the logFile
-          parity.stdout.pipe(logStream);
-          parity.stderr.pipe(logStream);
+      const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+      let logLastLine = ''; // Always contains last line of the logFile
 
-          // Save in memory the last line of the log file, for handling error
-          const callback = data => {
-            if (data && data.length) {
-              logLastLine = data.toString();
-            }
-          };
+      // Run an instance of parity with the correct args
+      const parityArgs = await getParityArgs();
 
-          parity.stdout.on('data', callback);
-          parity.stderr.on('data', callback);
+      // console.log(args);
+      parity = spawn(parityPath(), parityArgs);
 
-          parity.on('error', err => {
-            handleError(err, 'An error occured while running parity.');
-          });
-          parity.on('close', (exitCode, signal) => {
-            if (exitCode === 0) {
-              return;
-            }
+      // Pipe all parity command output into the logFile
+      parity.stdout.pipe(logStream);
+      parity.stderr.pipe(logStream);
 
-            // When there's already an instance of parity running, then the log
-            // is logging a particular line, see below. In this case, we just
-            // silently ignore our local instance, and let the 1st parity
-            // instance be the main one.
-            if (catchableErrors.some(error => logLastLine.includes(error))) {
-              console.log(
-                'Another instance of parity is running, closing local instance.'
-              );
-              return;
-            }
+      // Save in memory the last line of the log file, for handling error
+      const callback = data => {
+        if (data && data.length) {
+          logLastLine = data.toString();
+        }
+      };
 
-            // If the exit code is not 0, then we show some error message
-            if (Object.keys(parityArgv).length > 0) {
-              // If parity has been launched with some args, then most likely the
-              // args are wrong, so we show the output of parity.
-              const log = fs.readFileSync(logFile);
+      parity.stdout.on('data', callback);
+      parity.stderr.on('data', callback);
 
-              console.log(log.toString());
-              app.exit(1);
-            } else {
-              handleError(
-                new Error(`Exit code ${exitCode}, with signal ${signal}.`),
-                'An error occured while running parity.'
-              );
-            }
-          });
-        })
-        .then(() => {
-          // Notify the renderers
-          // mainWindow.webContents.send('parity-running', true);
-          global.isParityRunning = true; // Send this variable to renderes via IPC
-        })
-        .catch(err => {
-          handleError(err, 'An error occured while running parity.');
-        });
+      parity.on('error', err => {
+        handleError(err, 'An error occured while running parity.');
+      });
+      parity.on('close', (exitCode, signal) => {
+        if (exitCode === 0) {
+          return;
+        }
+
+        // When there's already an instance of parity running, then the log
+        // is logging a particular line, see below. In this case, we just
+        // silently ignore our local instance, and let the 1st parity
+        // instance be the main one.
+        if (catchableErrors.some(error => logLastLine.includes(error))) {
+          console.log('Another instance of parity is running, closing local instance.');
+          return;
+        }
+
+        // If the exit code is not 0, then we show some error message
+        if (Object.keys(parityArgs).length > 0) {
+          // If parity has been launched with some args, then most likely the
+          // args are wrong, so we show the output of parity.
+          const log = fs.readFileSync(logFile);
+
+          console.log(log.toString());
+          app.exit(1);
+        } else {
+          handleError(
+            new Error(`Exit code ${exitCode}, with signal ${signal}.`),
+            'An error occured while running parity.'
+          );
+        }
+      });
+
+      global.isParityRunning = true;
     } catch (e) {
-      console.error(e.message);
+      handleError(e.message, 'An error occured while running parity.');
     }
   },
   killParity () {

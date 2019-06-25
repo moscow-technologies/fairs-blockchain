@@ -17,13 +17,20 @@
 const electron = require('electron');
 const path = require('path');
 const url = require('url');
+const fs = require('fs');
 
 const addMenu = require('./menu');
 const { cli } = require('./cli');
+
 const doesParityExist = require('./operations/doesParityExist');
-const doesChainExist = require('./operations/doesChainExist');
-const fetchParity = require('./operations/fetchParity');
 const fetchChain = require('./operations/fetchChain');
+const doesPostRequest = require('./operations/doesPostRequest');
+const fetchSnapshot = require('./operations/fetchSnapshot');
+const { restoreSnapshot, killRestoreSnapshot } = require('./operations/restoreSnapshot');
+
+const configPath = require('./utils/configPath');
+const snapshotPath = require('./utils/snapshotPath');
+
 const handleError = require('./operations/handleError');
 const messages = require('./messages');
 const { killParity } = require('./operations/runParity');
@@ -33,6 +40,7 @@ const { app, BrowserWindow, ipcMain, session } = electron;
 const { URL } = url;
 
 let mainWindow;
+let downloadItem = {};
 
 // Disable gpu acceleration on linux
 // https://github.com/parity-js/shell/issues/157
@@ -40,7 +48,7 @@ if (!['darwin', 'win32'].includes(process.platform)) {
   app.disableHardwareAcceleration();
 }
 
-function createWindow () {
+async function createWindow () {
   // Will send these variables to renderers via IPC
   global.dirName = __dirname;
   global.wsInterface = cli.wsInterface;
@@ -67,15 +75,6 @@ function createWindow () {
     );
   }
 
-  doesChainExist()
-    .catch(() => fetchChain())
-    .catch(handleError)
-    .then(() => {
-      doesParityExist()
-        .catch(() => fetchParity(mainWindow)) // Install parity if not present
-        .catch(handleError); // Errors should be handled before, this is really just in case
-    });
-
   // Listen to messages from renderer process
   ipcMain.on('asynchronous-message', messages);
 
@@ -84,14 +83,17 @@ function createWindow () {
 
   // WS calls have Origin `file://` by default, which is not trusted.
   // We override Origin header on all WS connections with an authorized one.
-  session.defaultSession.webRequest.onBeforeSendHeaders({
-    urls: ['ws://*/*', 'wss://*/*']
-  }, (details, callback) => {
-    if (mainWindow && mainWindow.id) {
-      details.requestHeaders.Origin = `parity://${mainWindow.id}.ui.parity`;
-      callback({ requestHeaders: details.requestHeaders });
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    {
+      urls: ['ws://*/*', 'wss://*/*']
+    },
+    (details, callback) => {
+      if (mainWindow && mainWindow.id) {
+        details.requestHeaders.Origin = `parity://${mainWindow.id}.ui.parity`;
+        callback({ requestHeaders: details.requestHeaders });
+      }
     }
-  });
+  );
 
   // Verify WebView Options Before Creation
   // https://electronjs.org/docs/tutorial/security#12-verify-webview-options-before-creation
@@ -111,11 +113,10 @@ function createWindow () {
   mainWindow.webContents.on('did-attach-webview', (event, webContents) => {
     // Do not accept all kinds of web permissions (camera, location...)
     // https://electronjs.org/docs/tutorial/security#4-handle-session-permission-requests-from-remote-content
-    webContents.session
-      .setPermissionRequestHandler((webContents, permission, callback) => {
-        // Deny all permissions for dapps
-        return callback(false);
-      });
+    webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+      // Deny all permissions for dapps
+      return callback(false);
+    });
 
     let baseUrl;
     let appId;
@@ -162,11 +163,13 @@ function createWindow () {
 
     // Block in-page requests to resources outside the dapp folder
     webContents.session.webRequest.onBeforeRequest({ urls: ['file://*'] }, (details, callback) => {
-      if (baseUrl &&
-          !details.url.startsWith(baseUrl) &&
-          // dapp-dapp-visible needs to be able to display the icons of other
-          // dapps, so as a temporary fix we allow access to all images requests
-          details.resourceType !== 'image') {
+      if (
+        baseUrl &&
+        !details.url.startsWith(baseUrl) &&
+        // dapp-dapp-visible needs to be able to display the icons of other
+        // dapps, so as a temporary fix we allow access to all images requests
+        details.resourceType !== 'image'
+      ) {
         const sanitizedUrl = details.url.replace(/'/, '');
 
         if (!webContents.isDestroyed()) {
@@ -181,23 +184,65 @@ function createWindow () {
   });
 
   mainWindow.on('closed', () => {
+    if (downloadItem.item) {
+      downloadItem.item.cancel();
+    }
+    killRestoreSnapshot();
     mainWindow = null;
   });
+
+  try {
+    await doesPostRequest();
+    await fetchChain();
+    await doesParityExist(mainWindow, downloadItem);
+    downloadItem = {};
+
+    const config = fs.existsSync(configPath()) ? JSON.parse(fs.readFileSync(configPath()).toString()) : {};
+    const { snapshotDownloaded = false, restored = false } = config;
+
+    global.snapshotDownloaded = snapshotDownloaded;
+    global.isSnapshotRestored = restored;
+
+    if (!snapshotDownloaded) {
+      if (fs.existsSync(snapshotPath())) {
+        fs.unlinkSync(snapshotPath());
+      }
+
+      await fetchSnapshot(mainWindow, downloadItem);
+      downloadItem = {};
+    }
+
+    if (!restored) {
+      restoreSnapshot(mainWindow);
+    }
+  } catch (e) {
+    handleError(e);
+  }
 }
 
 app.on('ready', createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
+    killRestoreSnapshot();
     killParity();
     app.quit();
   }
 });
 
 // Make sure parity stops when UI stops
-app.on('before-quit', killParity);
-app.on('will-quit', killParity);
-app.on('quit', killParity);
+app.on('before-quit', () => {
+  killRestoreSnapshot();
+  killParity();
+});
+app.on('will-quit', () => {
+  killRestoreSnapshot();
+  killParity();
+});
+app.on('quit', () => {
+  killRestoreSnapshot();
+  killParity();
+});
 
 app.on('activate', () => {
   if (mainWindow === null) {

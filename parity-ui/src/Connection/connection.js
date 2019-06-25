@@ -53,7 +53,11 @@ class Connection extends Component {
     parityInstalled: false,
     progress: 0,
     token: '',
-    validToken: false
+    validToken: false,
+    snapshotDownloaded: false,
+    snapshotProgress: 0,
+    snapshotRestored: false,
+    snapshotRestoredProgress: 0
   }
 
   versionInfoStore = stores.parity.versionInfo().get(this.context.api)
@@ -62,21 +66,43 @@ class Connection extends Component {
     if (!isElectron()) { return; }
     const { ipcRenderer, remote } = electron;
     const parityInstalled = remote.getGlobal('isParityInstalled');
+    const snapshotDownloaded = remote.getGlobal('snapshotDownloaded');
+    const snapshotRestored = remote.getGlobal('isSnapshotRestored');
 
-    this.setState({ parityInstalled });
+    this.setState({ parityInstalled, snapshotDownloaded, snapshotRestored });
 
     // Listen to messages from main process
     ipcRenderer.on('parity-download-progress', (_, progress) => {
       // Run parity once the installation is finished
       if (progress === 1 && this.state.progress < 1) {
-        setTimeout(() => this.runParity(), 1000);
+        this.setState({ parityInstalled: true });
+        // setTimeout(() => this.runParity(), 1000);
       }
       this.setState({ progress });
     });
 
+    ipcRenderer.on('snapshot-download-progress', (_, snapshotProgress) => {
+      if (snapshotProgress >= 1) {
+        this.setState({ snapshotDownloaded: true });
+      }
+      this.setState({ snapshotProgress });
+    });
+
+    ipcRenderer.on('snapshot-restored', (_, snapshotRestoredProgress) => {
+      if (snapshotRestoredProgress === 'restored') {
+        this.setState({ snapshotRestored: true });
+        setTimeout(() => {
+          if (this.props.isConnected || !this.props.isConnecting) { return; }
+          this.runParity();
+        }, 3000);
+      } else if (snapshotRestoredProgress < 1) {
+        this.setState({ snapshotRestoredProgress });
+      }
+    });
+
     // Next step: if we're not connected, and parity is installed, then we
     // run parity.
-    if (this.props.isConnected || !parityInstalled) {
+    if (this.props.isConnected || !parityInstalled || !snapshotDownloaded || !snapshotRestored) {
       return;
     }
 
@@ -162,10 +188,10 @@ class Connection extends Component {
 
   renderIcon = () => {
     const { needsToken } = this.props;
-    const { parityInstalled, progress } = this.state;
+    const { parityInstalled, progress, snapshotDownloaded, snapshotProgress, snapshotRestored, snapshotRestoredProgress } = this.state;
 
     if (needsToken) { return <KeyIcon className={ styles.svg } />; }
-    if (!parityInstalled || progress) {
+    if (!parityInstalled) {
       return (
         <Circle
           containerStyle={ { height: '100px', marginTop: '-75px', width: '100px' } }
@@ -176,17 +202,41 @@ class Connection extends Component {
         />
       );
     }
+    if (!snapshotDownloaded) {
+      return (
+        <Circle
+          containerStyle={ { height: '100px', marginTop: '-75px', width: '100px' } }
+          initialAnimate
+          options={ { color: 'rgb(208, 208, 208)', strokeWidth: 5 } }
+          progress={ snapshotProgress }
+          text={ `${Math.round(snapshotProgress * 100)}%` }
+        />
+      );
+    }
+    if (!snapshotRestored) {
+      return (
+        <Circle
+          containerStyle={ { height: '100px', marginTop: '-75px', width: '100px' } }
+          initialAnimate
+          options={ { color: 'rgb(208, 208, 208)', strokeWidth: 5 } }
+          progress={ snapshotRestoredProgress }
+          text={ `${Math.round(snapshotRestoredProgress * 100)}%` }
+        />
+      );
+    }
     if (!this.isVersionCorrect()) { return <Icon className={ styles.svg } name='warning sign' />; }
     return <DashboardIcon className={ styles.svg } />;
   }
 
   renderText = () => {
     const { needsToken } = this.props;
-    const { parityInstalled, progress } = this.state;
+    const { parityInstalled, snapshotDownloaded, snapshotRestored } = this.state;
 
     if (needsToken) { return this.renderSigner(); }
-    if (progress === 1) { return this.renderRunningParity(); }
     if (!parityInstalled) { return this.renderProgress(); }
+    if (!snapshotDownloaded) { return this.renderSnapshotProgress(); }
+    if (!snapshotRestored) { return this.renderSnapshotRestore(); }
+    if (parityInstalled) { return this.renderRunningParity(); }
     if (!this.isVersionCorrect()) { return this.renderIncorrectVersion(); }
     return this.renderPing();
   }
@@ -252,6 +302,28 @@ class Connection extends Component {
         <FormattedMessage
           id='connection.installingParity'
           defaultMessage='Пожалуйста, дождитесь установки приложения.'
+        />
+      </div>
+    );
+  }
+
+  renderSnapshotProgress () {
+    return (
+      <div className={ styles.info }>
+        <FormattedMessage
+          id='connection.snapshotDownloaded'
+          defaultMessage='Пожалуйста, дождитесь окончания скачивания данных.'
+        />
+      </div>
+    );
+  }
+
+  renderSnapshotRestore () {
+    return (
+      <div className={ styles.info }>
+        <FormattedMessage
+          id='connection.restoreSnapshot'
+          defaultMessage='Пожалуйста подождите пока установится блокчейн.'
         />
       </div>
     );

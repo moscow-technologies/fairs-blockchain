@@ -15,6 +15,7 @@
 // along with Parity.  If not, see <http://www.gnu.org/licenses/>.
 
 const cli = require('commander');
+const axios = require('axios');
 
 const { productName } = require('../config.json');
 const { version } = require('../../package.json');
@@ -36,10 +37,7 @@ if (process.defaultApp !== true) {
 cli
   .version(version)
   .allowUnknownOption()
-  .option(
-    '--no-run-parity',
-    `${productName} will not attempt to run the locally installed parity.`
-  )
+  .option('--no-run-parity', `${productName} will not attempt to run the locally installed parity.`)
   .option(
     '--ui-dev',
     `${productName} will load http://localhost:3000. WARNING: Only use this is you plan on developing on ${productName}.`
@@ -61,10 +59,7 @@ cli
  * @return {String}
  * @see https://github.com/tj/commander.js/blob/dcddf698c5463795401ad3d6382f5ec5ec060478/index.js#L1160-L1172
  */
-const camelcase = flag =>
-  flag
-    .split('-')
-    .reduce((str, word) => str + word[0].toUpperCase() + word.slice(1));
+const camelcase = flag => flag.split('-').reduce((str, word) => str + word[0].toUpperCase() + word.slice(1));
 
 // Now we must think which arguments passed to cli must be passed down to
 // parity.
@@ -102,6 +97,26 @@ let parityArgv = cli.rawArgs
 
 const chainCodePath = chainPath();
 
-parityArgv = [...parityArgv, ...['--unsafe-expose', '--chain', chainCodePath, '--bootnodes', dappConf.enode]];
+// parityArgv = [...parityArgv, '--unsafe-expose', '--chain', chainCodePath, '--bootnodes', dappConf.enode];
 
-module.exports = { cli, parityArgv };
+const getEnode = async ip => {
+  const {
+    data: { result }
+  } = await axios.post(
+    `http://${ip}:8545`,
+    { method: 'parity_enode', params: [], id: 1, jsonrpc: '2.0' },
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  return `${result.split('@')[0]}@${ip}:30303`;
+};
+
+const getParityArgs = async () => {
+  const enodesPromises = dappConf.nodeIps.map(getEnode);
+
+  const enodes = await Promise.all(enodesPromises);
+
+  return [...parityArgv, '--unsafe-expose', '--chain', chainCodePath, '--bootnodes', enodes];
+};
+
+module.exports = { cli, parityArgv, getParityArgs };

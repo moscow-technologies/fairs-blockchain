@@ -1,8 +1,10 @@
 const fs = require('fs');
-const util = require('util');
 
 const chainPath = require('../utils/chainPath');
+const fetchChain = require('./fetchChain');
 
-const fsExists = util.promisify(fs.stat);
-
-module.exports = () => fsExists(chainPath());
+module.exports = async () => {
+  if (!fs.existsSync(chainPath())) {
+    await fetchChain();
+  }
+};

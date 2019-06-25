@@ -1,6 +1,6 @@
 {
   "name": "parity-ui-fairs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The Electron app for Parity UI",
   "main": ".build/electron.js",
   "jsnext:main": ".build/electron.js",
@@ -146,7 +146,6 @@
     "webpack-dev-server": "2.6.1",
     "webpack-error-notification": "0.1.6",
     "webpack-hot-middleware": "2.17.1",
-    "websocket": "1.0.24",
     "worker-loader": "1.1.1",
     "yauzl": "2.9.1"
   },
@@ -162,7 +161,7 @@
     "axios": "0.18.0",
     "command-exists": "1.2.2",
     "commander": "2.15.1",
-    "electron-dl": "1.11.0",
+    "electron-dl": "1.13.0",
     "follow-redirects": "1.5.0",
     "fs-extra": "6.0.1",
     "is-electron": "2.1.0",
@@ -192,6 +191,10 @@
     "solc": "ngotchac/solc-js",
     "store": "1.3.20",
     "unzipper": "0.8.14",
-    "util.promisify": "1.0.0"
+    "util.promisify": "1.0.0",
+    "websocket": "1.0.28"
+  },
+  "prettier": {
+    "singleQuote": true
   }
 }

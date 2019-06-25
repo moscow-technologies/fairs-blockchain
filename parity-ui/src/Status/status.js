@@ -30,7 +30,7 @@ import StatusIndicator from '@parity/ui/lib/StatusIndicator';
 import Consensus from './Consensus';
 import DefaultAccount from './DefaultAccount';
 import AccountStore from '../ParityBar/accountStore';
-// import SyncWarning from '../SyncWarning';
+import SyncWarning from '../SyncWarning';
 import PluginStore from './pluginStore';
 import SignerPending from './SignerPending';
 import Upgrade from './Upgrade';
@@ -94,7 +94,7 @@ function Status ({ className = '', upgradeStore }, { api }) {
           </div>
         </div>
       </GradientBg>
-      {/* <SyncWarning className={ styles.warning } /> */}
+      <SyncWarning className={ styles.warning } />
     </div>
   );
 }
