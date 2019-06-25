@@ -23,12 +23,9 @@ contract Owned {
 }
 
 contract ISeason is Owned {
-    function begin() public view returns (uint64);
-    function end() public view returns (uint64);
     function getHistoricalIndices() public view returns (uint64[] memory);
     function getRequestByIndex(uint64) public view returns (bytes30, uint64, Types.DeclarantType, string memory, uint64, Types.Speciality, uint64, uint64, string memory, uint64[] memory, bytes16);
     function getStatusUpdates(bytes30) public view returns (uint64[] memory, uint64[] memory, string memory);
-    function getLatestStatus(uint64 index) public view returns (uint64);
 }
 
 contract IDistributor is Owned {
@@ -49,6 +46,9 @@ contract SeasonFactory is Owned {
     address[] public seasons;
     address[] public distributions;
     address public newVersionAddress;
+    uint64[] seasonPeriodsBegins;
+    uint64[] seasonBegins;
+    uint64[] seasonEnds;
 
     event SeasonCreated(uint64 indexed begin, uint64 indexed end, address season);
 
@@ -63,19 +63,29 @@ contract SeasonFactory is Owned {
         newVersionAddress = newVersionAddress_;
     }
 
-    function addSeason(address seasonAddress) public onlyOwner {
+    function getSeasons() public view returns (address[] memory seasonAddresses, uint64[] memory seasonBegins_, uint64[] memory seasonEnds_, uint64[] memory seasonPeriodBegins_) {
         if (newVersionAddress != address(0)) {
             SeasonFactory newVersion = SeasonFactory(newVersionAddress);
-            newVersion.addSeason(seasonAddress);
+            return newVersion.getSeasons();
+        }
+        return (seasons, seasonBegins, seasonEnds, seasonPeriodsBegins);
+    }
+
+    function addSeason(address seasonAddress, uint64 seasonBegin, uint64 seasonEnd, uint64 seasonPeriodsBegin) public onlyOwner {
+        if (newVersionAddress != address(0)) {
+            SeasonFactory newVersion = SeasonFactory(newVersionAddress);
+            newVersion.addSeason(seasonAddress, seasonBegin, seasonEnd, seasonPeriodsBegin);
             return;
         }
 
         ISeason season = ISeason(seasonAddress);
         require(season.owner() == owner);
-        require(seasons.length == 0 || ISeason(seasons[seasons.length - 1]).end() < season.begin());
 
         seasons.push(seasonAddress);
-        emit SeasonCreated(season.begin(), season.end(), seasonAddress);
+        seasonBegins.push(seasonBegin);
+        seasonEnds.push(seasonEnd);
+        seasonPeriodsBegins.push(seasonPeriodsBegin);
+        emit SeasonCreated(seasonBegin, seasonEnd, seasonAddress);
     }
 
     function addDistribution(address distributionManagerAddress) public onlyOwner {
@@ -109,6 +119,26 @@ contract SeasonFactory is Owned {
         return uint64(seasons.length);
     }
 
+    function getSeasonForPeriod(uint64 period) public view returns (address) {
+        if (newVersionAddress != address(0)) {
+            SeasonFactory newVersion = SeasonFactory(newVersionAddress);
+            return newVersion.getSeasonForPeriod(period);
+        }
+
+        if (seasons.length == 0) {
+            return address(0);
+        }
+
+        for (uint i = seasons.length - 1; ; i--) {
+            if (seasonPeriodsBegins[i] <= period) {
+                return seasons[i];
+            }
+            if (i == 0) {
+                return address(0);
+            }
+        }
+    }
+
     function getLastSeason() public view returns (address) {
         if (newVersionAddress != address(0)) {
             SeasonFactory newVersion = SeasonFactory(newVersionAddress);
@@ -124,9 +154,7 @@ contract SeasonFactory is Owned {
 }
 
 contract Season is Owned {
-    uint64 public begin;
-    uint64 public end;
-    string name;
+    string public name;
 
     uint64 requestCount;
     Node[] nodes;
@@ -136,9 +164,7 @@ contract Season is Owned {
 
     event RequestCreated(bytes30 indexed serviceNumber, uint64 index);
 
-    constructor(uint64 begin_, uint64 end_, string memory name_) public {
-        begin = begin_;
-        end = end_;
+    constructor(string memory name_) public {
         name = name_;
     }
 
@@ -173,7 +199,7 @@ contract Season is Owned {
 
     function setRequestDeclarantTypeToFarmer(bytes30 serviceNumber) public onlyOwner {
         require(!isNewRequest(serviceNumber), "Request with provided service number was not found");
-        
+
         int index = getRequestIndex(serviceNumber);
         Request storage request = nodes[uint64(index)].request;
         request.declarantType = Types.DeclarantType.Farmer;
@@ -202,37 +228,34 @@ contract Season is Owned {
 
     function fixPlacementInHistory(uint64 newlyInsertedIndex, uint128 dateRegNumPair) private onlyOwner {
         if (newlyInsertedIndex == 0) {
-            nodes[0].prev = -1;
-            nodes[0].next = -1;
             return;
         }
 
-        int index = tailIndex;
-        while (index >= 0) {
-            Node storage n = nodes[uint64(index)];
+        Types.OptionU64 memory currentIndex = Types.OptionU64(true, tailIndex);
+        while (currentIndex.hasValue) {
+            Node storage n = nodes[currentIndex.value];
             if (n.request.dateRegNumPair <= dateRegNumPair) {
                 break;
             }
-            index = n.prev;
+            currentIndex = n.prev;
         }
 
-        if (index < 0) {
-            nodes[headIndex].prev = newlyInsertedIndex;
-            nodes[newlyInsertedIndex].next = headIndex;
-            nodes[newlyInsertedIndex].prev = -1;
+        if (!currentIndex.hasValue) {
+            nodes[headIndex].prev = Types.OptionU64(true, newlyInsertedIndex);
+            nodes[newlyInsertedIndex].next = Types.OptionU64(true, headIndex);
             headIndex = newlyInsertedIndex;
         }
         else {
-            Node storage node = nodes[uint64(index)];
+            Node storage currentNode = nodes[currentIndex.value];
             Node storage newNode = nodes[newlyInsertedIndex];
-            newNode.prev = index;
-            newNode.next = node.next;
-            if (node.next > 0) {
-                nodes[uint64(node.next)].prev = newlyInsertedIndex;
-            } else {
+            newNode.prev = currentIndex;
+            newNode.next = currentNode.next;
+            if (currentNode.next.hasValue) {
+                nodes[currentNode.next.value].prev = Types.OptionU64(true, newlyInsertedIndex);
+            } else if (currentIndex.value == tailIndex) {
                 tailIndex = newlyInsertedIndex;
             }
-            node.next = newlyInsertedIndex;
+            currentNode.next = Types.OptionU64(true, newlyInsertedIndex);
         }
     }
 
@@ -266,8 +289,8 @@ contract Season is Owned {
         request.statusUpdatesNotes = strConcat(request.statusUpdatesNotes, "\x1f", note);
     }
 
-    function getSeasonDetails() public view returns (uint64, uint64, string memory) {
-        return (begin, end, name);
+    function getSeasonDetails() public view returns (uint64, uint64, string memory name_) {	
+        return (0, 0, name);	
     }
 
     function getAllServiceNumbers() public view returns (bytes30[] memory) {
@@ -280,29 +303,14 @@ contract Season is Owned {
 
     function getHistoricalIndices() public view returns (uint64[] memory){
         uint64[] memory result = new uint64[](getRequestsCount());
-        int currentIndex = headIndex;
+        Types.OptionU64 memory currentIndex = Types.OptionU64(true, headIndex);
         for (uint64 i = 0; i < nodes.length; i++) {
-            Node storage node = nodes[uint64(currentIndex)];
-            result[i] = uint64(currentIndex);
+            require(currentIndex.hasValue);
+            Node storage node = nodes[currentIndex.value];
+            result[i] = currentIndex.value;
             currentIndex = node.next;
         }
         return result;
-    }
-
-    function getLatestStatus(uint64 index) public view returns (uint64) {
-        Node storage node = nodes[uint64(index)];
-        Types.StatusUpdate[] storage statusUpdates = node.request.statusUpdates;
-        uint latestStatusIndex = statusUpdates.length - 1;
-        for (uint i = latestStatusIndex; ; i--) {
-            if (statusUpdates[latestStatusIndex].responseDate < statusUpdates[i].responseDate) {
-                latestStatusIndex = i;
-            }
-            if (i == 0) {
-                break;
-            }
-        }
-        uint64 latestStatus = statusUpdates[latestStatusIndex].statusCode;
-        return latestStatus;
     }
 
     function getRequestIndex(bytes30 serviceNumber) public view returns (int) {
@@ -356,15 +364,16 @@ contract Season is Owned {
         uint64[] memory result = new uint64[](takeCount);
         uint64 skippedCount = 0;
         uint64 tookCount = 0;
-        int currentIndex = headIndex;
+        Types.OptionU64 memory currentIndex = Types.OptionU64(true, headIndex);
         for (uint64 i = 0; i < nodes.length && tookCount < result.length; i++) {
-            Node storage node = nodes[uint64(currentIndex)];
+            require(currentIndex.hasValue);
+            Node storage node = nodes[currentIndex.value];
             if (isMatch(node.request, declarantTypes, declarantName, fairId, speciality, district)) {
                 if (skippedCount < skipCount) {
                     skippedCount++;
                 }
                 else {
-                    result[tookCount++] = uint64(currentIndex);
+                    result[tookCount++] = currentIndex.value;
                 }
             }
             currentIndex = node.next;
@@ -445,8 +454,8 @@ contract Season is Owned {
 
     struct Node {
         Request request;
-        int prev;
-        int next;
+        Types.OptionU64 prev;
+        Types.OptionU64 next;
     }
 
     struct Request {
@@ -465,6 +474,994 @@ contract Season is Owned {
         string statusUpdatesNotes;
         string details;
         bytes16 userId;
+    }
+}
+
+contract SeasonSnapshot is Owned {
+    address public seasonAddress;
+    uint64 public currentPosition;
+    bool public isPositionSet;
+    uint64[] historicalIndices;
+
+    Types.DistributorRequest[] invididualsRequests;
+    Types.DistributorRequest[] farmerRequests;
+    Types.DistributorRequest[] ieLeRequests;
+
+    constructor(address seasonAddress_) public {
+        ISeason season = ISeason(seasonAddress_);
+        require(season.owner() == owner);
+
+        seasonAddress = seasonAddress_;
+    }
+
+    function loadHistoricalIndices() public onlyOwner {
+        require(!isPositionSet, "Position is already set");
+
+        ISeason season = ISeason(seasonAddress);
+        uint64[] memory indices = season.getHistoricalIndices();
+        for (uint i = 0; i < indices.length; i++) {
+            uint64 index = indices[i];
+            historicalIndices.push(index);
+        }
+        isPositionSet = true;
+    }
+
+    function isLoaded() public view returns (bool) {
+        return isPositionSet && currentPosition >= historicalIndices.length;
+    }
+
+    function loadRequests() public onlyOwner {
+        require(isPositionSet, "Position is not set");
+        require(!isLoaded(), "Is already loaded");
+
+        ISeason season = ISeason(seasonAddress);
+        uint64 batchSize = 500;
+
+        uint64 diff = uint64(historicalIndices.length) - currentPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+
+        for (uint i = 0; i < iterCount; i++) {
+            uint64 historicalIndex = historicalIndices[currentPosition];
+            currentPosition++;
+            Types.DistributorRequest memory request = getRequest(season, historicalIndex);
+            (uint64[] memory dates, uint64[] memory statusCodes, ) = season.getStatusUpdates(request.serviceNumber);
+            Types.OptionU64 memory rejectionStatus = getRejectionStatus(dates, statusCodes);
+
+            if (rejectionStatus.hasValue) {
+                continue;
+            }
+
+            if (request.declarantType == Types.DeclarantType.Individual) {
+                invididualsRequests.push(request);
+            }
+            else if (request.declarantType == Types.DeclarantType.Farmer && request.speciality == Types.Speciality.Vegetables) {
+                // only requests with vegetables speciality gets promoted
+                farmerRequests.push(request);
+            }
+            else if (request.declarantType == Types.DeclarantType.IndividualEntrepreneur
+                     || request.declarantType == Types.DeclarantType.LegalEntity
+                     || request.declarantType == Types.DeclarantType.Farmer
+                     || request.declarantType == Types.DeclarantType.IndividualAsIndividualEntrepreneur) {
+                ieLeRequests.push(request);
+            } else {
+                require (false, "Unexpected declarant type");
+            }
+        }
+    }
+
+    function getRequest(ISeason season, uint64 index) private view returns (Types.DistributorRequest memory) {
+        (bytes30 serviceNumber, , Types.DeclarantType declarantType, , uint64 fairId, Types.Speciality speciality, , , , uint64[] memory periods, bytes16 userId) = season.getRequestByIndex(index);
+        return Types.DistributorRequest(serviceNumber, userId, declarantType, fairId, getPeriodsWithRoundedDate(periods), speciality);
+    }
+
+    function getIndividualRequestsCount() public view returns (uint64) {
+        return uint64(invididualsRequests.length);
+    }
+
+    function getIndividualRequest(uint index) public view returns (bytes30, bytes16, Types.DeclarantType, uint64, uint64[] memory, Types.Speciality speciality) {
+        Types.DistributorRequest storage request = invididualsRequests[index];
+        return (request.serviceNumber, request.userId, request.declarantType, request.fairId, request.periods, request.speciality);
+    }
+
+    function getFarmerRequestsCount() public view returns (uint64) {
+        return uint64(farmerRequests.length);
+    }
+
+    function getFarmerRequest(uint index) public view returns (bytes30, bytes16, Types.DeclarantType, uint64, uint64[] memory, Types.Speciality speciality) {
+        Types.DistributorRequest storage request = farmerRequests[index];
+        return (request.serviceNumber, request.userId, request.declarantType, request.fairId, request.periods, request.speciality);
+    }
+
+    function getLeRequestsCount() public view returns (uint64) {
+        return uint64(ieLeRequests.length);
+    }
+
+    function getLeRequest(uint index) public view returns (bytes30, bytes16, Types.DeclarantType, uint64, uint64[] memory, Types.Speciality speciality) {
+        Types.DistributorRequest storage request = ieLeRequests[index];
+        return (request.serviceNumber, request.userId, request.declarantType, request.fairId, request.periods, request.speciality);
+    }
+
+    function getHistoricalIndicesCount() public view returns (uint64) {
+        return uint64(historicalIndices.length);
+    }
+
+    function getRejectionStatus(uint64[] memory dates, uint64[] memory statusCodes) private pure returns (Types.OptionU64 memory) {
+        require (dates.length == statusCodes.length);
+        require (dates.length > 0);
+        Types.OptionU64 memory latestStatusIndex = Types.OptionU64(false, 0);
+        for (uint64 i = uint64(dates.length - 1); ; i--) {
+            if ((!latestStatusIndex.hasValue || dates[i] > dates[latestStatusIndex.value]) && isDistributionStatus(statusCodes[i])) {
+                latestStatusIndex = Types.OptionU64(true, i);
+            }
+            if (i == 0) {
+                break;
+            }
+        }
+
+        if (!latestStatusIndex.hasValue) {
+            return Types.OptionU64(true, 0); // has no distributable status
+        }
+
+        uint64 latestStatus = statusCodes[latestStatusIndex.value];
+        if (isBadStatus(latestStatus)) {
+            return Types.OptionU64(true, latestStatus);
+        }
+
+        return Types.OptionU64(false, 0);
+    }
+
+    function isDistributionStatus(uint64 statusCode) private pure returns (bool) {
+        return statusCode == 1040
+            || statusCode == 1050
+            || statusCode == 77061
+            || statusCode == 77062
+            || statusCode == 1066
+            || statusCode == 1086
+            || isBadStatus(statusCode);
+    }
+
+    function isBadStatus(uint64 statusCode) private pure returns (bool) {
+        return statusCode == 1080
+            || statusCode == 1190
+            || statusCode == 1086
+            || statusCode == 103099;
+    }
+
+    function getPeriodsWithRoundedDate(uint64[] memory originalPeriods) private pure returns(uint64[] memory) {
+        uint64[] memory result = new uint64[](originalPeriods.length);
+        for (uint i = 0; i < result.length; i++) {
+           result[i] = (((originalPeriods[i] / 36000000000)/24)*24)*36000000000;
+        }
+        return result;
+    }
+}
+
+contract IndividualsDistributor is IDistributor {
+    address public seasonSnapshotAddress;
+    uint64 currentLoadPosition;
+    uint64 currentDistributionPosition;
+    bool isPositionSet;
+    bool public isWaitingListFinalized;
+    uint64 public requestsCount;
+    Types.DistributorRequest[] requests;
+    Types.FairPeriod[] allPeriods;
+    mapping(uint256 => bytes30) registeredDeclarantRequests;
+    mapping(uint256 => mapping(uint256 => Types.MaybeUninit)) fairsToPeriodsToSpecialitiesToPeriodIndex;
+
+    constructor(address seasonSnapshotAddress_) public {
+        SeasonSnapshot seasonSnapshot = SeasonSnapshot(seasonSnapshotAddress_);
+        require(seasonSnapshot.owner() == owner);
+
+        seasonSnapshotAddress = seasonSnapshotAddress_;
+        requestsCount = seasonSnapshot.getIndividualRequestsCount();
+    }
+
+    function isLoaded() public view returns (bool) {
+        return isPositionSet &&
+            currentLoadPosition >= requestsCount;
+    }
+
+    function isDistributed() public view returns (bool) {
+        return isLoaded() &&
+            currentDistributionPosition >= requestsCount;
+    }
+
+    function init(uint64[] memory fairsIds, uint64[] memory periods, Types.Speciality[] memory specialities, uint64[] memory placesCount) public onlyOrigin {
+        for (uint i = 0; i < fairsIds.length; i++) {
+            Types.FairPeriod memory fairPeriod;
+            fairPeriod.fairId = fairsIds[i];
+            fairPeriod.date = periods[i];
+            fairPeriod.placesCount = placesCount[i];
+            fairPeriod.speciality = specialities[i];
+            allPeriods.push(fairPeriod);
+            if (specialities[i] == Types.Speciality.Vegetables) {
+                 // only vegetables are allowed for individuals
+                fairsToPeriodsToSpecialitiesToPeriodIndex[fairPeriod.fairId][fairPeriod.date] = Types.MaybeUninit(true, i);
+            }
+        }
+        isPositionSet = true;
+    }
+
+    function loadRequests() public onlyOrigin {
+        require(!isLoaded());
+
+        SeasonSnapshot seasonSnapshot = SeasonSnapshot(seasonSnapshotAddress);
+        uint64 batchSize = 500;
+
+        uint64 diff = requestsCount - currentLoadPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+
+        for (uint i = 0; i < iterCount; i++) {
+            Types.DistributorRequest memory request = getRequest(seasonSnapshot, currentLoadPosition);
+            requests.push(request);
+            for (uint j = 0; j < request.periods.length; j++) {
+                uint64 periodId = request.periods[j];
+                Types.MaybeUninit storage periodIndex = fairsToPeriodsToSpecialitiesToPeriodIndex[request.fairId][periodId];
+                if (!periodIndex.isInited) {
+                    continue; // we didn't pass this period in distribution command - skipping unwanted request
+                }
+                Types.FairPeriod storage period = allPeriods[periodIndex.value];
+                period.allRequests.push(request.serviceNumber);
+            }
+            currentLoadPosition++;
+        }
+    }
+
+    function distribute() public onlyOrigin {
+        require(!isDistributed());
+
+        uint64 batchSize = 500;
+
+        uint64 diff = requestsCount - currentDistributionPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+
+        for (uint i = 0; i < iterCount; i++) {
+            Types.DistributorRequest storage request = requests[currentDistributionPosition]; // 1.1
+
+            for (uint j = 0; j < request.periods.length; j++) {
+                uint64 periodId = request.periods[j];
+                uint256 userPeriodId = uint256(uint128(request.userId)) << 128 | uint256(periodId); // it's basically a tuple (period, userId)
+                Types.MaybeUninit storage periodIndex = fairsToPeriodsToSpecialitiesToPeriodIndex[request.fairId][periodId];
+                if (!periodIndex.isInited) {
+                    continue; // we didn't pass this period in distribution command - skipping unwanted request
+                }
+                Types.FairPeriod storage period = allPeriods[periodIndex.value];
+
+                if (period.isRequestFullyProcessed[request.serviceNumber]) {
+                    continue;
+                }
+
+                if (registeredDeclarantRequests[userPeriodId] != 0 && registeredDeclarantRequests[userPeriodId] != request.serviceNumber) {
+                    period.rejectedServiceNumbers.push(request.serviceNumber);
+                    period.isRequestFullyProcessed[request.serviceNumber] = true;
+                    continue; // skip registered Individuals
+                }
+                if (period.placesCount > 0) {
+                    period.placesCount--;
+                    period.serviceNumbers.push(request.serviceNumber); // 1.2
+                    registeredDeclarantRequests[userPeriodId] = request.serviceNumber; // 1.3 setting mark that other requests for this declarant should be declined
+                    period.isRequestFullyProcessed[request.serviceNumber] = true;  // 1.3 setting mark that request was processed
+                }
+            }
+
+            currentDistributionPosition++;
+        }
+    }
+
+    function getUnoccupiedPlaces() public view returns(uint64[] memory, bool[] memory) {
+        uint64[] memory result = new uint64[](getPeriodsCount());
+        bool[] memory areUpdatable = new bool[](result.length);
+        for (uint i = 0; i < result.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                result[i] = allPeriods[i].placesCount;
+                areUpdatable[i] = true;
+            }
+        }
+        return (result, areUpdatable);
+    }
+
+    function getRequestedPlaces() public view returns(uint64[] memory) {
+        uint64[] memory result = new uint64[](getPeriodsCount());
+        for (uint i = 0; i < result.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                result[i] = uint64(allPeriods[i].allRequests.length);
+            }
+        }
+        return result;
+    }
+
+    function getPeriodsCount() public view returns(uint64) {
+        return uint64(allPeriods.length);
+    }
+
+    function getPeriod(uint64 index) public view returns(uint64, uint64, bytes30[] memory, bytes30[] memory, bytes30[] memory, Types.Speciality) {
+        Types.FairPeriod storage period = allPeriods[index];
+        return (period.fairId, period.date, period.serviceNumbers, period.waitingList, period.rejectedServiceNumbers, period.speciality);
+    }
+
+    function updatePlaces(uint64[] memory placesCounts) public onlyOrigin {
+        for (uint i = 0; i < placesCounts.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                allPeriods[i].placesCount = placesCounts[i];
+            }
+        }
+        currentDistributionPosition = 0;
+    }
+
+    function finalizeWaitingLists() public onlyOrigin {
+        require(!isWaitingListFinalized);
+        for (uint i = 0; i < allPeriods.length; i++) {
+            Types.FairPeriod storage period = allPeriods[i];
+            for (uint j = 0; j < period.allRequests.length; j++) {
+                bytes30 serviceNumber = period.allRequests[j];
+                if (!period.isRequestFullyProcessed[serviceNumber]) {
+                    period.waitingList.push(serviceNumber);
+                }
+            }
+        }
+        isWaitingListFinalized = true;
+    }
+
+    function getRequest(SeasonSnapshot seasonSnapshot, uint64 index) private view returns (Types.DistributorRequest memory) {
+        (bytes30 serviceNumber, bytes16 userId, Types.DeclarantType declarantType, uint64 fairId, uint64[] memory periods, Types.Speciality speciality) = seasonSnapshot.getIndividualRequest(index);
+        return Types.DistributorRequest(serviceNumber, userId, declarantType, fairId, periods, speciality);
+    }
+}
+
+contract FarmersDistributor is IDistributor {
+    address public seasonSnapshotAddress;
+    address public userPeriodsStorageAddress;
+    uint64 currentLoadPosition;
+    uint64 currentDistributionPosition;
+    bool isPositionSet;
+    bool shouldDeclineRequestsWithLoweredPriority;
+    bool public isWaitingListFinalized;
+    uint64 public requestsCount;
+    Types.DistributorRequest[] requests;
+    Types.FairPeriod[] allPeriods;
+    mapping(uint64 => mapping(uint256 => bytes30)) fairsToRegisteredDeclarantRequests;
+    mapping(uint256 => mapping(uint256 => Types.MaybeUninit)) fairsToPeriodsToSpecialitiesToPeriodIndex;
+
+    constructor(address seasonSnapshotAddress_, address userPeriodsStorageAddress_) public {
+        SeasonSnapshot seasonSnapshot = SeasonSnapshot(seasonSnapshotAddress_);
+        require(seasonSnapshot.owner() == owner);
+
+        userPeriodsStorageAddress = userPeriodsStorageAddress_;
+        seasonSnapshotAddress = seasonSnapshotAddress_;
+        requestsCount = seasonSnapshot.getFarmerRequestsCount();
+        shouldDeclineRequestsWithLoweredPriority = true;
+    }
+
+    function isLoaded() public view returns (bool) {
+        return isPositionSet &&
+            currentLoadPosition >= requestsCount;
+    }
+
+    function isDistributed() public view returns (bool) {
+        return isLoaded() &&
+            currentDistributionPosition >= requestsCount;
+    }
+
+    function init(uint64[] memory fairsIds, uint64[] memory periods, Types.Speciality[] memory specialities, uint64[] memory placesCount) public onlyOrigin {
+        for (uint i = 0; i < fairsIds.length; i++) {
+            Types.FairPeriod memory fairPeriod;
+            fairPeriod.fairId = fairsIds[i];
+            fairPeriod.date = periods[i];
+            fairPeriod.placesCount = placesCount[i];
+            fairPeriod.speciality = specialities[i];
+            allPeriods.push(fairPeriod);
+            if (specialities[i] == Types.Speciality.Vegetables) {
+                 // only vegetables are allowed for farmers
+                fairsToPeriodsToSpecialitiesToPeriodIndex[fairPeriod.fairId][fairPeriod.date] = Types.MaybeUninit(true, i);
+            }
+        }
+        isPositionSet = true;
+    }
+
+    function loadRequests() public onlyOrigin {
+        require(!isLoaded());
+
+        SeasonSnapshot seasonSnapshot = SeasonSnapshot(seasonSnapshotAddress);
+        uint64 batchSize = 500;
+
+        uint64 diff = requestsCount - currentLoadPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+
+        for (uint i = 0; i < iterCount; i++) {
+            Types.DistributorRequest memory request = getRequest(seasonSnapshot, currentLoadPosition);
+            requests.push(request);
+
+            for (uint j = 0; j < request.periods.length; j++) {
+                uint64 periodId = request.periods[j];
+                Types.MaybeUninit storage periodIndex = fairsToPeriodsToSpecialitiesToPeriodIndex[request.fairId][periodId];
+                if (!periodIndex.isInited) {
+                    continue; // we didn't pass this period in distribution command - skipping unwanted request
+                }
+                Types.FairPeriod storage period = allPeriods[periodIndex.value];
+                period.allRequests.push(request.serviceNumber);
+            }
+            currentLoadPosition++;
+        }
+    }
+
+    function distribute() public onlyOrigin {
+        require(!isDistributed());
+
+        uint64 batchSize = 500;
+
+        uint64 diff = requestsCount - currentDistributionPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+
+        UserPeriodsStorage userPeriodsStorage = UserPeriodsStorage(userPeriodsStorageAddress);
+
+        for (uint i = 0; i < iterCount; i++) {
+            Types.DistributorRequest storage request = requests[currentDistributionPosition]; // 2.1
+
+            for (uint j = 0; j < request.periods.length; j++) {
+                uint64 periodId = request.periods[j];
+                uint256 userPeriodId = uint256(uint128(request.userId)) << 128 | uint256(periodId); // it's basically a tuple (period, userId)
+
+                if (shouldDeclineRequestsWithLoweredPriority && userPeriodsStorage.declarantRegisteredRequestForPeriod(userPeriodId) != 0) {
+                    continue; // skip request with lowered priority
+                }
+
+                Types.MaybeUninit storage periodIndex = fairsToPeriodsToSpecialitiesToPeriodIndex[request.fairId][periodId];
+                if (!periodIndex.isInited) {
+                    continue; // we didn't pass this period in distribution command - skipping unwanted request
+                }
+                Types.FairPeriod storage period = allPeriods[periodIndex.value];
+
+                if (period.isRequestFullyProcessed[request.serviceNumber]) {
+                    continue; // skipping already processed requsets
+                }
+
+                if (fairsToRegisteredDeclarantRequests[request.fairId][userPeriodId] != 0 && fairsToRegisteredDeclarantRequests[request.fairId][userPeriodId] != request.serviceNumber) {
+                    period.rejectedServiceNumbers.push(request.serviceNumber);
+                    period.isRequestFullyProcessed[request.serviceNumber] = true;
+                    continue; // skip registered periods
+                }
+                if (period.placesCount > 0) {
+                    period.placesCount--;
+                    period.serviceNumbers.push(request.serviceNumber); // 2.2
+                    userPeriodsStorage.addDeclarant(userPeriodId, request.serviceNumber); // 2.3 setting mark that other requests for this declarant should be declined
+                    fairsToRegisteredDeclarantRequests[request.fairId][userPeriodId] = request.serviceNumber; // 2.3 setting mark that other requests for this declarant should be declined
+                    period.isRequestFullyProcessed[request.serviceNumber] = true;  // 2.3 setting mark that request was processed
+                }
+            }
+
+            currentDistributionPosition++;
+        }
+
+        if (isDistributed() && shouldDeclineRequestsWithLoweredPriority) {
+            shouldDeclineRequestsWithLoweredPriority = false; // 2.5
+            currentDistributionPosition = 0;
+        }
+    }
+
+    function getUnoccupiedPlaces() public view returns(uint64[] memory, bool[] memory) {
+        uint64[] memory result = new uint64[](getPeriodsCount());
+        bool[] memory areUpdatable = new bool[](result.length);
+        for (uint i = 0; i < result.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                result[i] = allPeriods[i].placesCount;
+                areUpdatable[i] = true;
+            }
+        }
+        return (result, areUpdatable);
+    }
+
+    function getRequestedPlaces() public view returns(uint64[] memory) {
+        uint64[] memory result = new uint64[](getPeriodsCount());
+        for (uint i = 0; i < result.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                result[i] = uint64(allPeriods[i].allRequests.length);
+            }
+        }
+        return result;
+    }
+
+    function getPeriodsCount() public view returns(uint64) {
+        return uint64(allPeriods.length);
+    }
+
+    function getPeriod(uint64 index) public view returns(uint64, uint64, bytes30[] memory, bytes30[] memory, bytes30[] memory, Types.Speciality) {
+        Types.FairPeriod storage period = allPeriods[index];
+        return (period.fairId, period.date, period.serviceNumbers, period.waitingList, period.rejectedServiceNumbers, period.speciality);
+    }
+
+    function updatePlaces(uint64[] memory placesCounts) public onlyOrigin {
+        for (uint i = 0; i < placesCounts.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                allPeriods[i].placesCount = placesCounts[i];
+            }
+        }
+        currentDistributionPosition = 0;
+    }
+
+    function finalizeWaitingLists() public onlyOrigin {
+        require(!isWaitingListFinalized);
+        for (uint i = 0; i < allPeriods.length; i++) {
+            Types.FairPeriod storage period = allPeriods[i];
+            for (uint j = 0; j < period.allRequests.length; j++) {
+                bytes30 serviceNumber = period.allRequests[j];
+                if (!period.isRequestFullyProcessed[serviceNumber]) {
+                    period.waitingList.push(serviceNumber);
+                }
+            }
+        }
+        isWaitingListFinalized = true;
+    }
+
+    function getRequest(SeasonSnapshot seasonSnapshot, uint64 index) private view returns (Types.DistributorRequest memory) {
+        (bytes30 serviceNumber, bytes16 userId, Types.DeclarantType declarantType, uint64 fairId, uint64[] memory periods, Types.Speciality speciality) = seasonSnapshot.getFarmerRequest(index);
+        return Types.DistributorRequest(serviceNumber, userId, declarantType, fairId, periods, speciality);
+    }
+}
+
+contract LeDistributor is IDistributor {
+    address public seasonSnapshotAddress;
+    address public userPeriodsStorageAddress;
+    uint64 currentLoadPosition;
+    uint64 currentDistributionPosition;
+    bool isPositionSet;
+    bool shouldDeclineRequestsWithLoweredPriority;
+    bool public isWaitingListFinalized;
+    uint64 public requestsCount;
+    Types.DistributorRequest[] requests;
+    Types.FairPeriod[] allPeriods;
+    mapping(uint64 => mapping(uint256 => bytes30)) fairsToRegisteredDeclarantRequests;
+    mapping(uint256 => mapping(uint256 => mapping(uint256 => Types.MaybeUninit))) fairsToPeriodsToSpecialitiesToPeriodIndex;
+
+    constructor(address seasonSnapshotAddress_, address userPeriodsStorageAddress_) public {
+        SeasonSnapshot seasonSnapshot = SeasonSnapshot(seasonSnapshotAddress_);
+        require(seasonSnapshot.owner() == owner);
+
+        seasonSnapshotAddress = seasonSnapshotAddress_;
+        userPeriodsStorageAddress = userPeriodsStorageAddress_;
+        requestsCount = seasonSnapshot.getLeRequestsCount();
+        shouldDeclineRequestsWithLoweredPriority = true;
+    }
+
+    function isLoaded() public view returns (bool) {
+        return isPositionSet &&
+            currentLoadPosition >= requestsCount;
+    }
+
+    function isDistributed() public view returns (bool) {
+        return isLoaded() &&
+            currentDistributionPosition >= requestsCount;
+    }
+
+    function init(uint64[] memory fairsIds, uint64[] memory periods, Types.Speciality[] memory specialities, uint64[] memory placesCount) public onlyOrigin {
+        for (uint i = 0; i < fairsIds.length; i++) {
+            Types.FairPeriod memory fairPeriod;
+            fairPeriod.fairId = fairsIds[i];
+            fairPeriod.date = periods[i];
+            fairPeriod.placesCount = placesCount[i];
+            fairPeriod.speciality = specialities[i];
+            allPeriods.push(fairPeriod);
+            fairsToPeriodsToSpecialitiesToPeriodIndex[fairsIds[i]][periods[i]][uint256(specialities[i])] = Types.MaybeUninit(true, i);
+        }
+        isPositionSet = true;
+    }
+
+    function loadRequests() public onlyOrigin {
+        require(!isLoaded());
+
+        SeasonSnapshot seasonSnapshot = SeasonSnapshot(seasonSnapshotAddress);
+        uint64 batchSize = 500;
+
+        uint64 diff = requestsCount - currentLoadPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+
+        for (uint i = 0; i < iterCount; i++) {
+            Types.DistributorRequest memory request = getRequest(seasonSnapshot, currentLoadPosition);
+            requests.push(request);
+            Types.Speciality speciality = request.speciality;
+            for (uint j = 0; j < request.periods.length; j++) {
+                uint64 periodId = request.periods[j];
+                Types.MaybeUninit storage periodIndex = fairsToPeriodsToSpecialitiesToPeriodIndex[request.fairId][periodId][uint256(speciality)];
+                if (!periodIndex.isInited) {
+                    continue; // we didn't pass this period in distribution command - skipping unwanted request
+                }
+                Types.FairPeriod storage period = allPeriods[periodIndex.value];
+                period.allRequests.push(request.serviceNumber);
+            }
+            currentLoadPosition++;
+        }
+    }
+
+    function distribute() public onlyOrigin {
+        require(!isDistributed());
+
+        uint64 batchSize = 500;
+
+        uint64 diff = requestsCount - currentDistributionPosition;
+        uint64 iterCount = diff > batchSize ? batchSize : diff;
+        UserPeriodsStorage userPeriodsStorage = UserPeriodsStorage(userPeriodsStorageAddress);
+
+        for (uint i = 0; i < iterCount; i++) {
+            Types.DistributorRequest storage request = requests[currentDistributionPosition]; // 1.1
+            Types.Speciality speciality = request.speciality;
+
+            for (uint j = 0; j < request.periods.length; j++) {
+                uint64 periodId = request.periods[j];
+                uint256 userPeriodId = uint256(uint128(request.userId)) << 128 | uint256(periodId); // it's basically a tuple (period, userId)
+
+                if (shouldDeclineRequestsWithLoweredPriority && userPeriodsStorage.declarantRegisteredRequestForPeriod(userPeriodId) != 0) {
+                    continue; // skip request with lowered priority
+                }
+
+                Types.MaybeUninit storage periodIndex = fairsToPeriodsToSpecialitiesToPeriodIndex[request.fairId][periodId][uint256(speciality)];
+
+                if (!periodIndex.isInited) {
+                    continue; // we didn't pass this period in distribution command - skipping unwanted request
+                }
+
+                Types.FairPeriod storage period = allPeriods[periodIndex.value];
+
+                if (period.isRequestFullyProcessed[request.serviceNumber]) {
+                    continue; // skipping already processed requsets
+                }
+
+                if (fairsToRegisteredDeclarantRequests[request.fairId][userPeriodId] != 0 && fairsToRegisteredDeclarantRequests[request.fairId][userPeriodId] != request.serviceNumber) {
+                    period.rejectedServiceNumbers.push(request.serviceNumber);
+                    period.isRequestFullyProcessed[request.serviceNumber] = true;
+                    continue; // skip registered periods
+                }
+                if (period.placesCount > 0) {
+                    period.placesCount--;
+                    period.serviceNumbers.push(request.serviceNumber); // 3.2
+                    userPeriodsStorage.addDeclarant(userPeriodId, request.serviceNumber);        // 3.3 setting mark that other requests for this declarant should be declined
+                    fairsToRegisteredDeclarantRequests[request.fairId][userPeriodId] = request.serviceNumber; // 3.3 setting mark that other requests for this declarant should be declined
+                    period.isRequestFullyProcessed[request.serviceNumber] = true;  // 3.3 setting mark that request was processed
+                }
+            }
+
+            currentDistributionPosition++;
+        }
+
+        if (isDistributed() && shouldDeclineRequestsWithLoweredPriority) {
+            shouldDeclineRequestsWithLoweredPriority = false;   // 3.5
+            currentDistributionPosition = 0;
+        }
+    }
+
+    function getUnoccupiedPlaces() public view returns(uint64[] memory, bool[] memory) {
+        uint64[] memory result = new uint64[](getPeriodsCount());
+        bool[] memory areUpdatable = new bool[](result.length);
+        for (uint i = 0; i < result.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                result[i] = allPeriods[i].placesCount;
+                areUpdatable[i] = true;
+            }
+        }
+        return (result, areUpdatable);
+    }
+
+    function getRequestedPlaces() public view returns(uint64[] memory) {
+        uint64[] memory result = new uint64[](getPeriodsCount());
+        for (uint i = 0; i < result.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                result[i] = uint64(allPeriods[i].allRequests.length);
+            }
+        }
+        return result;
+    }
+
+    function getPeriodsCount() public view returns(uint64) {
+        return uint64(allPeriods.length);
+    }
+
+    function getPeriod(uint64 index) public view returns(uint64, uint64, bytes30[] memory, bytes30[] memory, bytes30[] memory, Types.Speciality) {
+        Types.FairPeriod storage period = allPeriods[index];
+        return (period.fairId, period.date, period.serviceNumbers, period.waitingList, period.rejectedServiceNumbers, period.speciality);
+    }
+
+    function updatePlaces(uint64[] memory placesCounts) public onlyOrigin {
+        for (uint i = 0; i < placesCounts.length; i++) {
+            if (allPeriods[i].speciality == Types.Speciality.Vegetables) {
+                allPeriods[i].placesCount = placesCounts[i];
+            }
+        }
+        currentDistributionPosition = 0;
+    }
+
+    function finalizeWaitingLists() public onlyOrigin {
+        require(!isWaitingListFinalized);
+        for (uint i = 0; i < allPeriods.length; i++) {
+            Types.FairPeriod storage period = allPeriods[i];
+            for (uint j = 0; j < period.allRequests.length; j++) {
+                bytes30 serviceNumber = period.allRequests[j];
+                if (!period.isRequestFullyProcessed[serviceNumber]) {
+                    period.waitingList.push(serviceNumber);
+                }
+            }
+        }
+        isWaitingListFinalized = true;
+    }
+
+    function getRequest(SeasonSnapshot seasonSnapshot, uint64 index) private view returns (Types.DistributorRequest memory) {
+        (bytes30 serviceNumber, bytes16 userId, Types.DeclarantType declarantType, uint64 fairId, uint64[] memory periods, Types.Speciality speciality) = seasonSnapshot.getLeRequest(index);
+        return Types.DistributorRequest(serviceNumber, userId, declarantType, fairId, periods, speciality);
+    }
+}
+
+contract DistributionCommand is Owned {
+    uint64[] fairsIds;
+    uint64[] periods;
+    Types.Speciality[] specialities;
+    uint64[] individualsPlacesCount;
+    uint64[] farmersPlacesCount;
+    uint64[] lePlacesCount;
+    uint64[] minPlaces;
+
+    constructor(uint64[] memory fairsIds_,
+                         uint64[] memory periods_,
+                         Types.Speciality[] memory specialities_,
+                         uint64[] memory individualsPlacesCount_,
+                         uint64[] memory farmersPlacesCount_,
+                         uint64[] memory lePlacesCount_,
+                         uint64[] memory minPlaces_) public {
+        fairsIds = fairsIds_;
+        periods = getPeriodsWithRoundedDate(periods_);
+        specialities = specialities_;
+        individualsPlacesCount = individualsPlacesCount_;
+        farmersPlacesCount = farmersPlacesCount_;
+        lePlacesCount = lePlacesCount_;
+        minPlaces = minPlaces_;
+    }
+
+    function getValues() public view returns (uint64[] memory,
+                         uint64[] memory,
+                         Types.Speciality[] memory,
+                         uint64[] memory,
+                         uint64[] memory,
+                         uint64[] memory,
+                         uint64[] memory) {
+        return (fairsIds, periods, specialities, individualsPlacesCount, farmersPlacesCount, lePlacesCount, minPlaces);
+    }
+
+    function getPeriodsWithRoundedDate(uint64[] memory originalPeriods) private pure returns(uint64[] memory) {
+        uint64[] memory result = new uint64[](originalPeriods.length);
+        for (uint i = 0; i < result.length; i++) {
+           result[i] = (((originalPeriods[i] / 36000000000)/24)*24)*36000000000;
+        }
+        return result;
+    }
+}
+
+contract DistributionManager is Owned {
+    address public individualsDistributorAddress;
+    address public farmersDistributorAddress;
+    address public leDistributorAddress;
+    address public distributionCommandAddress;
+
+    bool public isDistributed;
+    bool isInitialiyRedistributed;
+
+    uint initStep = 0;
+
+    RedistributionInfo[] redistributionInfos;
+    uint64[] minPlaces;
+
+    constructor(address individualsDistributorAddress_, address farmersDistributorAddress_, address leDistributorAddress_, address distributionCommandAddress_) public {
+        individualsDistributorAddress = individualsDistributorAddress_;
+        farmersDistributorAddress = farmersDistributorAddress_;
+        leDistributorAddress = leDistributorAddress_;
+        distributionCommandAddress = distributionCommandAddress_;
+    }
+
+    function isLoaded() public view returns (bool) {
+        (IDistributor individualsDistributor, IDistributor farmersDistributor, IDistributor leDistributor) = getDistributors();
+        return individualsDistributor.isLoaded() && farmersDistributor.isLoaded() && leDistributor.isLoaded();
+    }
+
+    function isInited() public view returns (bool) {
+        return initStep > 3;
+    }
+
+    function init() public onlyOrigin {
+        require (!isInited(), "Already inited");
+
+        (IDistributor individualsDistributor, IDistributor farmersDistributor, IDistributor leDistributor) = getDistributors();
+        DistributionCommand distributionCommand = DistributionCommand(distributionCommandAddress);
+        (uint64[] memory fairsIds, uint64[] memory periods, Types.Speciality[] memory specialities, uint64[] memory individualsPlacesCount, uint64[] memory farmersPlacesCount, uint64[] memory lePlacesCount, uint64[] memory minPlaces_) = distributionCommand.getValues();
+        if (initStep == 0) {
+            individualsDistributor.init(fairsIds, periods, specialities, individualsPlacesCount);
+        } else if (initStep == 1) {
+            farmersDistributor.init(fairsIds, periods, specialities, farmersPlacesCount);
+        } else if (initStep == 2) {
+            leDistributor.init(fairsIds, periods, specialities, lePlacesCount);
+        } else if (initStep == 3) {
+            redistributionInfos.length = periods.length;
+            minPlaces = minPlaces_;
+        } else {
+            require(false, "Unreachable");
+        }
+        initStep += 1;
+    }
+
+    function loadRequests() public onlyOwner {
+        require(isInited(), "Is not inited");
+        require(!isLoaded(), "Already loaded");
+
+        (IDistributor individualsDistributor, IDistributor farmersDistributor, IDistributor leDistributor) = getDistributors();
+        if (!individualsDistributor.isLoaded()) {
+            individualsDistributor.loadRequests();
+        }
+        else if (!farmersDistributor.isLoaded()) {
+            farmersDistributor.loadRequests(); 
+        }
+        else if (!leDistributor.isLoaded()) {
+            leDistributor.loadRequests();
+        }
+    }
+
+    function distribute() public onlyOwner {
+        require(isLoaded(), "Is not loaded");
+        require(!isDistributed, "Aleady distributed");
+
+        (IDistributor individualsDistributor, IDistributor farmersDistributor, IDistributor leDistributor) = getDistributors();
+        if (!isInitialiyRedistributed) {
+            performInitialRedistribution(individualsDistributor, farmersDistributor, leDistributor);
+            isInitialiyRedistributed = true;
+        }
+        else if (!individualsDistributor.isDistributed()) {
+            individualsDistributor.distribute();
+        }
+        else if (!farmersDistributor.isDistributed()) {
+            farmersDistributor.distribute();
+        }
+        else if (!leDistributor.isDistributed()) {
+            leDistributor.distribute();
+        } else {
+            bool needsRedistribution = false;
+
+            (uint64[] memory iPlaces, bool[] memory iAreUpdatables) = individualsDistributor.getUnoccupiedPlaces();
+            (uint64[] memory fPlaces, bool[] memory fAreUpdatables) = farmersDistributor.getUnoccupiedPlaces();
+            (uint64[] memory lePlaces, bool[] memory leAreUpdatables) = leDistributor.getUnoccupiedPlaces();
+
+            for (uint i = 0; i < iPlaces.length; i++) {
+                uint64 unoccupiedPlacesCount;
+                if (leAreUpdatables[i] && lePlaces[i] > 0) { // 4.1
+                    unoccupiedPlacesCount = lePlaces[i];
+                    lePlaces[i] = 0;
+
+                    if (redistributionInfos[i].redistributedToIndividualsCount < 2) {
+                        iPlaces[i] += unoccupiedPlacesCount;
+                        needsRedistribution = true;
+                        redistributionInfos[i].redistributedToIndividualsCount += 1;
+                    } else if (redistributionInfos[i].redistributedToFarmersCount < 2) {
+                        fPlaces[i] += unoccupiedPlacesCount;
+                        needsRedistribution = true;
+                        redistributionInfos[i].redistributedToFarmersCount += 1;
+                    }
+                } else if (iAreUpdatables[i] && iPlaces[i] > 0) {  // 4.2
+                    unoccupiedPlacesCount = iPlaces[i];
+                    iPlaces[i] = 0;
+
+                    if (redistributionInfos[i].redistributedToFarmersCount < 2) {
+                        fPlaces[i] += unoccupiedPlacesCount;
+                        needsRedistribution = true;
+                        redistributionInfos[i].redistributedToFarmersCount += 1;
+                    } else if (redistributionInfos[i].redistributedToLEsCount < 2) {
+                        lePlaces[i] += unoccupiedPlacesCount;
+                        needsRedistribution = true;
+                        redistributionInfos[i].redistributedToLEsCount += 1;
+                    }
+                } else if (fAreUpdatables[i] && fPlaces[i] > 0) { // 4.3
+                    unoccupiedPlacesCount = fPlaces[i];
+                    fPlaces[i] = 0;
+
+                    if (redistributionInfos[i].redistributedToIndividualsCount < 2) {
+                        iPlaces[i] += unoccupiedPlacesCount;
+                        needsRedistribution = true;
+                        redistributionInfos[i].redistributedToIndividualsCount += 1;
+                    } else if (redistributionInfos[i].redistributedToLEsCount < 2) {
+                        lePlaces[i] += unoccupiedPlacesCount;
+                        needsRedistribution = true;
+                        redistributionInfos[i].redistributedToLEsCount += 1;
+                    }
+                }
+            }
+
+            if (needsRedistribution) {
+                individualsDistributor.updatePlaces(iPlaces);
+                farmersDistributor.updatePlaces(fPlaces);
+                leDistributor.updatePlaces(lePlaces);
+            }
+            else {
+                individualsDistributor.finalizeWaitingLists();
+                farmersDistributor.finalizeWaitingLists();
+                leDistributor.finalizeWaitingLists();
+                isDistributed = true;
+            }
+        }
+    }
+
+    function getPeriodsCount() public view returns(uint64) {
+        (IDistributor individualsDistributor, IDistributor farmersDistributor, IDistributor leDistributor) = getDistributors();
+        uint64 iCount = individualsDistributor.getPeriodsCount();
+        uint64 fCount = farmersDistributor.getPeriodsCount();
+        uint64 leCount = leDistributor.getPeriodsCount();
+
+        require (iCount == fCount && fCount == leCount);
+
+        return iCount;
+    }
+
+    function getIndividualsPeriod(uint64 index) public view returns (uint64, uint64, bytes30[] memory, bytes30[] memory, bytes30[] memory, Types.Speciality) {
+        IDistributor distributor = IDistributor(individualsDistributorAddress);
+        return distributor.getPeriod(index);
+    }
+
+    function getFarmersPeriod(uint64 index) public view returns (uint64, uint64, bytes30[] memory, bytes30[] memory, bytes30[] memory, Types.Speciality) {
+        IDistributor distributor = IDistributor(farmersDistributorAddress);
+        return distributor.getPeriod(index);
+    }
+
+    function getLesPeriod(uint64 index) public view returns (uint64, uint64, bytes30[] memory, bytes30[] memory, bytes30[] memory, Types.Speciality) {
+        IDistributor distributor = IDistributor(leDistributorAddress);
+        return distributor.getPeriod(index);
+    }
+
+    function getMinPlace(uint index) public view returns (uint64) {
+        return minPlaces[index];
+    }
+
+    function getDistributors() private view returns(IDistributor, IDistributor, IDistributor) {
+        IDistributor individualsDistributor = IDistributor(individualsDistributorAddress);
+        IDistributor farmersDistributor = IDistributor(farmersDistributorAddress);
+        IDistributor leDistributor = IDistributor(leDistributorAddress);
+        return (individualsDistributor, farmersDistributor, leDistributor);
+    }
+
+    function performInitialRedistribution(IDistributor individualsDistributor, IDistributor farmersDistributor, IDistributor leDistributor) private {
+        uint64[] memory fRequestedPlaces = farmersDistributor.getRequestedPlaces();
+        uint64[] memory leRequestedPlaces = leDistributor.getRequestedPlaces();
+
+        (uint64[] memory iPlaces, bool[] memory iAreUpdatables) = individualsDistributor.getUnoccupiedPlaces();
+        (uint64[] memory fPlaces, ) = farmersDistributor.getUnoccupiedPlaces();
+        (uint64[] memory lePlaces, ) = leDistributor.getUnoccupiedPlaces();
+
+        for (uint i = 0; i < iPlaces.length; i++) {
+            if (!iAreUpdatables[i]) {
+                continue;
+            }
+
+            // redistributing unoccupied farmers places, if any
+            int fDiff = int(fPlaces[i]) - int(fRequestedPlaces[i]);
+            if (fDiff > 0) {
+                fPlaces[i] = fRequestedPlaces[i];
+                iPlaces[i] += uint64(fDiff);
+            }
+
+            // redistributing unoccupied le places, if any
+            int leDiff = int(lePlaces[i]) - int(leRequestedPlaces[i]);
+            if (leDiff > 0) {
+                lePlaces[i] = leRequestedPlaces[i];
+                iPlaces[i] += uint64(leDiff);
+            }
+        }
+
+        individualsDistributor.updatePlaces(iPlaces);
+        farmersDistributor.updatePlaces(fPlaces);
+        leDistributor.updatePlaces(lePlaces);
+    }
+
+    struct RedistributionInfo {
+        uint8 redistributedToIndividualsCount;
+        uint8 redistributedToFarmersCount;
+        uint8 redistributedToLEsCount;
+    }
+}
+
+contract UserPeriodsStorage is Owned {
+    mapping(uint256 => bytes30) public declarantRegisteredRequestForPeriod;
+
+    function addDeclarant(uint256 userPeriodId, bytes30 serviceNumber) public onlyOrigin {
+        declarantRegisteredRequestForPeriod[userPeriodId] = serviceNumber;
     }
 }
 
@@ -519,6 +1516,11 @@ library Types {
     struct MaybeUninit {
         bool isInited;
         uint value;
+    }
+
+    struct OptionU64 {
+        bool hasValue;
+        uint64 value;
     }
 
     enum Speciality
