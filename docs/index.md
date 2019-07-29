@@ -8,7 +8,7 @@
   - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/3.5/Parity.UI.Fairs.Setup.3.5.exe)
 
 ### MacOS
-  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/3.5/Parity.UI.Fairs-3.5.dmg)
+  - Скачайте и запустите [установочный пакет](https://github.com/moscow-technologies/fairs-blockchain/releases/download/3.5/Parity.UI.Fairs.3.5.dmg)
 
 ## Предварительная настройка
 
